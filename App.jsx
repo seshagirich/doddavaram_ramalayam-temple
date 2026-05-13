@@ -451,7 +451,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
       }
     })
 
-    doc.save(`Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(///g, '-')}.pdf`)
+    doc.save(`Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.pdf`)
   }
 
   // ── Excel ──
@@ -478,7 +478,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Expenses')
-    XLSX.writeFile(wb, `Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(///g, '-')}.xlsx`)
+    XLSX.writeFile(wb, `Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.xlsx`)
   }
 
   // ── CSV ──
@@ -509,7 +509,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
 
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }))
-    a.download = `Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(///g, '-')}.csv`
+    a.download = `Ramalayam_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.csv`
     a.click()
   }
 
