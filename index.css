@@ -1,0 +1,12 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #F5F2ED;
+}
+button, input, select {
+  font-family: 'DM Sans', sans-serif;
+}
