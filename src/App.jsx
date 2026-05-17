@@ -460,7 +460,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
 
     setForm(f => ({ ...f, description: '', amount: '' }))
     setReceiptFile(null)
-    const fileInput = document.getElementById('receipt-upload')
+    const fileInput = document.getElementById('expense-receipt-upload')
     if (fileInput) fileInput.value = ''
   }
 
@@ -500,17 +500,38 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     if (!donationForm.date) { setDonationFormErr('Please select a date.'); return }
 
     setDonationFormErr('')
+    setIsUploading(true)
+
+    let receipt_url = null
+    if (receiptFile) {
+      const ext = receiptFile.name.split('.').pop()
+      const fileName = `don_${Date.now()}_${Math.random().toString(36).substring(2)}.${ext}`
+      const { data, error } = await supabase.storage.from('receipts').upload(fileName, receiptFile)
+      if (!error) {
+        const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName)
+        receipt_url = urlData.publicUrl
+      } else {
+        console.error("Upload error:", error)
+        alert("Failed to upload receipt, but will save donation.")
+      }
+    }
+
     const newDonation = {
       donor_name: donationForm.donor_name.trim(),
       amount: Number(donationForm.amount),
       date: donationForm.date,
       notes: donationForm.notes.trim(),
-      added_by: currentUser
+      added_by: currentUser,
+      receipt_url: receipt_url
     }
 
     const { error } = await supabase.from('donations').insert([newDonation])
+    setIsUploading(false)
     if (error) { alert('Failed to save donation: ' + error.message); return }
     setDonationForm({ donor_name: '', amount: '', date: todayISO(), notes: '' })
+    setReceiptFile(null)
+    const fileInput = document.getElementById('donation-receipt-upload')
+    if (fileInput) fileInput.value = ''
   }
 
   const deleteDonation = async (id) => {
@@ -634,12 +655,12 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     wsExp['!cols'] = [{ wch: 4 }, { wch: 36 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 28 }, { wch: 40 }]
     XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses')
 
-    const donHeaders = ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By']
+    const donHeaders = ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By', 'Receipt URL']
     const donRows = filteredDonations.map((item, i) => [
-      i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount), item.added_by || '-'
+      i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount), item.added_by || '-', item.receipt_url || ''
     ])
     const wsDon = XLSX.utils.aoa_to_sheet([['Donations Ledger'], [], donHeaders, ...donRows, [], ['', '', '', 'Grand Total', Math.round(totalDonations)]])
-    wsDon['!cols'] = [{ wch: 4 }, { wch: 36 }, { wch: 36 }, { wch: 14 }, { wch: 16 }, { wch: 28 }]
+    wsDon['!cols'] = [{ wch: 4 }, { wch: 36 }, { wch: 36 }, { wch: 14 }, { wch: 16 }, { wch: 28 }, { wch: 40 }]
     XLSX.utils.book_append_sheet(wb, wsDon, 'Donations')
 
     XLSX.writeFile(wb, `Ramalayam_Master_Ledger_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.xlsx`)
@@ -830,7 +851,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>RECEIPT PHOTO (Optional)</div>
-                    <input id="receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: C.text2 }} />
+                    <input id="expense-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: C.text2 }} />
                   </div>
                   <button onClick={addExpense} disabled={isUploading} style={{ height: 44, background: isUploading ? C.text3 : C.green, color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: isUploading ? 'not-allowed' : 'pointer' }}>
                     {isUploading ? 'Uploading...' : '+ Add Expense'}
@@ -922,7 +943,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             {isEditor && (
               <div style={{ background: '#E8F5E9', borderRadius: 18, padding: '24px 26px', marginBottom: 24, boxShadow: '0 4px 20px rgba(46, 125, 50, 0.1)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#2E7D32', marginBottom: 14 }}>ADD DONATION RECEIVED</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', gap: 12, alignItems: 'end' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gap: 12, alignItems: 'end', marginBottom: 16 }}>
                   <div>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>DONOR NAME</div>
                     <input value={donationForm.donor_name} onChange={e => setDonationForm({ ...donationForm, donor_name: e.target.value })} placeholder="e.g. Smt. Lakshmi Devi" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
@@ -939,7 +960,15 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>NOTES (optional)</div>
                     <input value={donationForm.notes} onChange={e => setDonationForm({ ...donationForm, notes: e.target.value })} placeholder="For temple construction" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <button onClick={addDonation} style={{ height: 44, background: '#2E7D32', color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: 'pointer' }}>+ Add Donation</button>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>PAYMENT RECEIPT (Optional)</div>
+                    <input id="donation-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: '#2E7D32' }} />
+                  </div>
+                  <button onClick={addDonation} disabled={isUploading} style={{ height: 44, background: isUploading ? C.text3 : '#2E7D32', color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: isUploading ? 'not-allowed' : 'pointer' }}>
+                    {isUploading ? 'Uploading...' : '+ Add Donation'}
+                  </button>
                 </div>
                 {donationFormErr && <div style={{ color: C.danger, fontSize: 12, marginTop: 10, fontWeight: 500 }}>{donationFormErr}</div>}
               </div>
@@ -974,7 +1003,12 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                     <tbody>
                     {filteredDonations.map((d, idx) => (
                         <tr key={d.id} style={{ borderTop: idx > 0 ? `1px solid ${C.border}` : 'none' }}>
-                          <td style={{ padding: '13px 18px', fontWeight: 600, color: C.text }}>{d.donor_name}</td>
+                          <td style={{ padding: '13px 18px', fontWeight: 600, color: C.text }}>
+                            {d.donor_name}
+                            {d.receipt_url && (
+                              <a href={d.receipt_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8, fontSize: 14, textDecoration: 'none' }} title="View Receipt">📎</a>
+                            )}
+                          </td>
                           <td style={{ padding: '13px 18px', color: C.text2, fontSize: 12 }}>{fmtDate(d.date)}</td>
                           <td style={{ padding: '13px 18px', textAlign: 'right', fontWeight: 700, color: '#2E7D32', fontSize: 14 }}>{fmt(d.amount)}</td>
                           <td style={{ padding: '13px 18px', color: C.text2, fontSize: 12 }}>{d.notes || '-'}</td>
