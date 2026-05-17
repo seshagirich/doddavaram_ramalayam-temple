@@ -11,11 +11,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ─── MEMBERS ────────────────────────────────────────────────────────────────
 const MEMBERS = [
-  { name: 'Koteswara Rao Chennupati', initials: 'KC', pin: '1234' },
-  { name: 'Ramanjaneyulu Chennupati', initials: 'RC', pin: '2345' },
-  { name: 'Phani Gogineni',           initials: 'PG', pin: '3456' },
-  { name: 'Ganapathi Gorantla',       initials: 'GG', pin: '4567' },
-  { name: 'Srinu Gorantla',           initials: 'AK', pin: '5678' },
+  { name: 'Koteswara Rao Chennupati', initials: 'KC', pin: '3637' },
+  { name: 'Ramanjaneyulu Chennupati', initials: 'RC', pin: '2024' },
+  { name: 'Phani Gogineni',           initials: 'PG', pin: '4667' },
+  { name: 'Ganapathi Gorantla',       initials: 'GG', pin: '9988' },
+  { name: 'Srinu Gorantla',           initials: 'SG', pin: '1700' },
 ]
 
 // ─── CATEGORIES ─────────────────────────────────────────────────────────────
