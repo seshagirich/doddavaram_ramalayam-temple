@@ -563,19 +563,19 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     doc.text(`Construction Budget Tracker — ${isExp ? 'Expense' : 'Donation'} Report`, 14, 23)
     doc.setFontSize(9)
     doc.text(`Period: ${fl}   |   Generated: ${ds}   |   By: ${currentUser}`, 14, 30)
-    doc.text(`Total Entries: ${data.length}   |   Grand Total: ₹${Math.round(total).toLocaleString('en-IN')}`, 14, 36)
+    doc.text(`Total Entries: ${data.length}   |   Grand Total: Rs. ${Math.round(total).toLocaleString('en-IN')}`, 14, 36)
 
     autoTable(doc, {
       startY: 50,
       head: [isExp
-        ? ['#', 'Description', 'Category', 'Date', 'Amount', 'Added by']
-        : ['#', 'Donor Name', 'Notes', 'Date', 'Amount', 'Recorded By']
+        ? ['#', 'Description', 'Category', 'Date', 'Amount (Rs.)', 'Added by']
+        : ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By']
       ],
       body: data.map((item, i) => isExp
-        ? [i + 1, item.description, CAT_LABELS[item.category], fmtDate(item.date), '₹' + Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
-        : [i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), '₹' + Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
+        ? [i + 1, item.description, CAT_LABELS[item.category], fmtDate(item.date), Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
+        : [i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
       ),
-      foot: [['', '', '', 'Grand Total', '₹' + Math.round(total).toLocaleString('en-IN'), '']],
+      foot: [['', '', '', 'Grand Total', Math.round(total).toLocaleString('en-IN'), '']],
       headStyles: { fillColor: isExp ? [45, 80, 22] : [46, 125, 50], textColor: 255, fontStyle: 'bold', fontSize: 9, cellPadding: 4 },
       footStyles: { fillColor: isExp ? [238, 245, 232] : [232, 245, 233], textColor: isExp ? [45, 80, 22] : [46, 125, 50], fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9, textColor: [30, 30, 30], cellPadding: 3 },
