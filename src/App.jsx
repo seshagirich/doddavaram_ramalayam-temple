@@ -775,8 +775,8 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto' }}>
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
               <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14 }}>🔍</span>
               <input
                 type="text"
@@ -785,7 +785,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                 onChange={e => setSearchQuery(e.target.value)}
                 style={{
                   padding: '9px 14px 9px 34px', borderRadius: 12, border: `1px solid ${C.border2}`,
-                  fontSize: 13, outline: 'none', width: 200, color: C.text
+                  fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box', color: C.text
                 }}
               />
             </div>
@@ -828,27 +828,27 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             {isEditor && (
               <div style={{ background: C.white, borderRadius: 18, padding: '24px 26px', marginBottom: 24, boxShadow: '0 4px 20px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.green, marginBottom: 14 }}>ADD EXPENSE</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.3fr 1.1fr 1fr', gap: 12, alignItems: 'end', marginBottom: 16 }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>DESCRIPTION</div>
-                    <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="e.g. Cement bags, Labor charges..." style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="e.g. Cement bags, Labor charges..." style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>CATEGORY</div>
-                    <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', background: C.white }}>
+                    <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', background: C.white }}>
                       {Object.entries(CAT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                     </select>
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>DATE</div>
-                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
+                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>AMOUNT (₹)</div>
-                    <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0" style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>RECEIPT PHOTO (Optional)</div>
                     <input id="expense-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: C.text2 }} />
@@ -943,25 +943,25 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             {isEditor && (
               <div style={{ background: '#E8F5E9', borderRadius: 18, padding: '24px 26px', marginBottom: 24, boxShadow: '0 4px 20px rgba(46, 125, 50, 0.1)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#2E7D32', marginBottom: 14 }}>ADD DONATION RECEIVED</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gap: 12, alignItems: 'end', marginBottom: 16 }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>DONOR NAME</div>
-                    <input value={donationForm.donor_name} onChange={e => setDonationForm({ ...donationForm, donor_name: e.target.value })} placeholder="e.g. Smt. Lakshmi Devi" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={donationForm.donor_name} onChange={e => setDonationForm({ ...donationForm, donor_name: e.target.value })} placeholder="e.g. Smt. Lakshmi Devi" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>AMOUNT (₹)</div>
-                    <input type="number" value={donationForm.amount} onChange={e => setDonationForm({ ...donationForm, amount: e.target.value })} placeholder="0" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input type="number" value={donationForm.amount} onChange={e => setDonationForm({ ...donationForm, amount: e.target.value })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>DATE</div>
-                    <input type="date" value={donationForm.date} onChange={e => setDonationForm({ ...donationForm, date: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
+                    <input type="date" value={donationForm.date} onChange={e => setDonationForm({ ...donationForm, date: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>NOTES (optional)</div>
-                    <input value={donationForm.notes} onChange={e => setDonationForm({ ...donationForm, notes: e.target.value })} placeholder="For temple construction" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={donationForm.notes} onChange={e => setDonationForm({ ...donationForm, notes: e.target.value })} placeholder="For temple construction" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>PAYMENT RECEIPT (Optional)</div>
                     <input id="donation-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: '#2E7D32' }} />
