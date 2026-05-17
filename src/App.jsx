@@ -55,6 +55,7 @@ const todayDMY = () => {
 }
 const flLabel = f =>
   f === 'all' ? 'All Time' :
+  f === '1w'  ? 'Last 1 Week' :
   f === '1m'  ? 'Last 1 Month' :
   f === '3m'  ? 'Last 3 Months' : 'Last 6 Months'
 
@@ -330,6 +331,9 @@ function Dashboard({ currentUser, isEditor, onExit }) {
   const [formErr, setFormErr] = useState('')
   const [donationFormErr, setDonationFormErr] = useState('')
   const [activeTab, setActiveTab] = useState('expenses')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [receiptFile, setReceiptFile] = useState(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   const [form, setForm] = useState({
     description: '', category: 'foundation', date: todayISO(), amount: ''
@@ -339,30 +343,10 @@ function Dashboard({ currentUser, isEditor, onExit }) {
   })
   const [syncStatus, setSyncStatus] = useState('🟢 Live')
 
-  // ── SUPABASE: Fetch + Realtime for BOTH tables ──
+  // ── SUPABASE: Realtime Subscriptions ──
   useEffect(() => {
-    let expenseChannel, donationChannel
-
-    const loadAllData = async () => {
-      setLoading(true)
-      const [expRes, donRes] = await Promise.all([
-        supabase.from('expenses').select('*').order('date', { ascending: false }),
-        supabase.from('donations').select('*').order('date', { ascending: false })
-      ])
-
-      if (expRes.error) console.error('Expenses error:', expRes.error)
-      if (donRes.error) console.error('Donations error:', donRes.error)
-
-      setExpenses(expRes.data || [])
-      setDonations(donRes.data || [])
-      setSyncStatus('🟢 Live')
-      setLoading(false)
-    }
-
-    loadAllData()
-
-    // Realtime for expenses
-    expenseChannel = supabase
+    setSyncStatus('🟢 Live')
+    const expenseChannel = supabase
       .channel('expenses-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, (payload) => {
         if (payload.eventType === 'INSERT') setExpenses(prev => [payload.new, ...prev])
@@ -371,8 +355,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
       })
       .subscribe()
 
-    // Realtime for donations
-    donationChannel = supabase
+    const donationChannel = supabase
       .channel('donations-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'donations' }, (payload) => {
         if (payload.eventType === 'INSERT') setDonations(prev => [payload.new, ...prev])
@@ -382,23 +365,57 @@ function Dashboard({ currentUser, isEditor, onExit }) {
       .subscribe()
 
     return () => {
-      if (expenseChannel) supabase.removeChannel(expenseChannel)
-      if (donationChannel) supabase.removeChannel(donationChannel)
+      supabase.removeChannel(expenseChannel)
+      supabase.removeChannel(donationChannel)
     }
   }, [])
 
-  // ── Filtered data ──
+  // ── SUPABASE: Fetch Data (Server-Side Filter) ──
+  useEffect(() => {
+    const loadAllData = async () => {
+      setLoading(true)
+      const now = new Date()
+      let cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      let applyFilter = true
+      
+      if (filter === '1w') cutoff.setDate(cutoff.getDate() - 7)
+      else if (filter === '1m') cutoff.setMonth(cutoff.getMonth() - 1)
+      else if (filter === '3m') cutoff.setMonth(cutoff.getMonth() - 3)
+      else if (filter === '6m') cutoff.setMonth(cutoff.getMonth() - 6)
+      else applyFilter = false
+
+      let expQ = supabase.from('expenses').select('*').order('date', { ascending: false })
+      let donQ = supabase.from('donations').select('*').order('date', { ascending: false })
+
+      if (applyFilter) {
+        const iso = cutoff.toISOString().split('T')[0]
+        expQ = expQ.gte('date', iso)
+        donQ = donQ.gte('date', iso)
+      }
+
+      const [expRes, donRes] = await Promise.all([expQ, donQ])
+      if (!expRes.error) setExpenses(expRes.data || [])
+      if (!donRes.error) setDonations(donRes.data || [])
+      setLoading(false)
+    }
+    loadAllData()
+  }, [filter])
+
+  // ── Filtered data (Client Search) ──
   const getFilteredExpenses = () => {
-    if (filter === 'all') return expenses
-    const now = new Date()
-    const months = filter === '1m' ? 1 : filter === '3m' ? 3 : 6
-    const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate())
-    return expenses.filter(e => new Date(e.date) >= cutoff)
+    if (!searchQuery.trim()) return expenses
+    const q = searchQuery.toLowerCase()
+    return expenses.filter(e => e.description.toLowerCase().includes(q) || (e.added_by && e.added_by.toLowerCase().includes(q)))
+  }
+  const getFilteredDonations = () => {
+    if (!searchQuery.trim()) return donations
+    const q = searchQuery.toLowerCase()
+    return donations.filter(d => d.donor_name.toLowerCase().includes(q) || (d.notes && d.notes.toLowerCase().includes(q)) || (d.added_by && d.added_by.toLowerCase().includes(q)))
   }
   const filteredExpenses = getFilteredExpenses()
   const totalExpenses = filteredExpenses.reduce((s, e) => s + Number(e.amount), 0)
 
-  const filteredDonations = donations
+  const filteredDonations = getFilteredDonations()
   const totalDonations = filteredDonations.reduce((s, d) => s + Number(d.amount), 0)
   const netBalance = totalDonations - totalExpenses
 
@@ -412,17 +429,39 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     if (!form.amount || Number(form.amount) <= 0) { setFormErr('Please enter a valid amount.'); return }
 
     setFormErr('')
+    setIsUploading(true)
+
+    let receipt_url = null
+    if (receiptFile) {
+      const ext = receiptFile.name.split('.').pop()
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${ext}`
+      const { data, error } = await supabase.storage.from('receipts').upload(fileName, receiptFile)
+      if (!error) {
+        const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName)
+        receipt_url = urlData.publicUrl
+      } else {
+        console.error("Upload error:", error)
+        alert("Failed to upload receipt, but will save expense.")
+      }
+    }
+
     const newExpense = {
       description: form.description.trim(),
       category: form.category,
       date: form.date,
       amount: Number(form.amount),
-      added_by: currentUser
+      added_by: currentUser,
+      receipt_url: receipt_url
     }
 
     const { error } = await supabase.from('expenses').insert([newExpense])
+    setIsUploading(false)
     if (error) { alert('Failed to save expense: ' + error.message); return }
+
     setForm(f => ({ ...f, description: '', amount: '' }))
+    setReceiptFile(null)
+    const fileInput = document.getElementById('expense-receipt-upload')
+    if (fileInput) fileInput.value = ''
   }
 
   const startEdit = e => {
@@ -461,17 +500,38 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     if (!donationForm.date) { setDonationFormErr('Please select a date.'); return }
 
     setDonationFormErr('')
+    setIsUploading(true)
+
+    let receipt_url = null
+    if (receiptFile) {
+      const ext = receiptFile.name.split('.').pop()
+      const fileName = `don_${Date.now()}_${Math.random().toString(36).substring(2)}.${ext}`
+      const { data, error } = await supabase.storage.from('receipts').upload(fileName, receiptFile)
+      if (!error) {
+        const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName)
+        receipt_url = urlData.publicUrl
+      } else {
+        console.error("Upload error:", error)
+        alert("Failed to upload receipt, but will save donation.")
+      }
+    }
+
     const newDonation = {
       donor_name: donationForm.donor_name.trim(),
       amount: Number(donationForm.amount),
       date: donationForm.date,
       notes: donationForm.notes.trim(),
-      added_by: currentUser
+      added_by: currentUser,
+      receipt_url: receipt_url
     }
 
     const { error } = await supabase.from('donations').insert([newDonation])
+    setIsUploading(false)
     if (error) { alert('Failed to save donation: ' + error.message); return }
     setDonationForm({ donor_name: '', amount: '', date: todayISO(), notes: '' })
+    setReceiptFile(null)
+    const fileInput = document.getElementById('donation-receipt-upload')
+    if (fileInput) fileInput.value = ''
   }
 
   const deleteDonation = async (id) => {
@@ -483,14 +543,16 @@ function Dashboard({ currentUser, isEditor, onExit }) {
   // ── PDF ──
   const downloadPDF = () => {
     setShowMenu(false)
-    if (!filteredExpenses.length) { alert('No expenses for this period.'); return }
+    const isExp = activeTab === 'expenses'
+    const data = isExp ? filteredExpenses : filteredDonations
+    if (!data.length) { alert(`No ${isExp ? 'expenses' : 'donations'} for this period.`); return }
 
     const fl = flLabel(filter)
     const ds = todayDMY()
-    const total = filteredExpenses.reduce((s, e) => s + Number(e.amount), 0)
+    const total = data.reduce((s, item) => s + Number(item.amount), 0)
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
-    doc.setFillColor(45, 80, 22)
+    doc.setFillColor(isExp ? 45 : 46, isExp ? 80 : 125, isExp ? 22 : 50)
     doc.rect(0, 0, 210, 42, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(20)
@@ -498,33 +560,116 @@ function Dashboard({ currentUser, isEditor, onExit }) {
     doc.text('Sri Ramalayam Temple', 14, 16)
     doc.setFontSize(11)
     doc.setFont('helvetica', 'normal')
-    doc.text('Construction Budget Tracker — Expense Report', 14, 23)
+    doc.text(`Construction Budget Tracker — ${isExp ? 'Expense' : 'Donation'} Report`, 14, 23)
     doc.setFontSize(9)
     doc.text(`Period: ${fl}   |   Generated: ${ds}   |   By: ${currentUser}`, 14, 30)
-    doc.text(`Total Entries: ${filteredExpenses.length}   |   Grand Total: ₹${Math.round(total).toLocaleString('en-IN')}`, 14, 36)
+    doc.text(`Total Entries: ${data.length}   |   Grand Total: Rs. ${Math.round(total).toLocaleString('en-IN')}`, 14, 36)
 
     autoTable(doc, {
       startY: 50,
-      head: [['#', 'Description', 'Category', 'Date', 'Amount', 'Added by']],
-      body: filteredExpenses.map((e, i) => [
-        i + 1, e.description, CAT_LABELS[e.category], fmtDate(e.date),
-        '₹' + Math.round(e.amount).toLocaleString('en-IN'), e.added_by || '-'
-      ]),
-      foot: [['', '', '', 'Grand Total', '₹' + Math.round(total).toLocaleString('en-IN'), '']],
-      headStyles: { fillColor: [45, 80, 22], textColor: 255, fontStyle: 'bold', fontSize: 9, cellPadding: 4 },
-      footStyles: { fillColor: [238, 245, 232], textColor: [45, 80, 22], fontStyle: 'bold', fontSize: 9 },
+      head: [isExp
+        ? ['#', 'Description', 'Category', 'Date', 'Amount (Rs.)', 'Added by']
+        : ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By']
+      ],
+      body: data.map((item, i) => isExp
+        ? [i + 1, item.description, CAT_LABELS[item.category], fmtDate(item.date), Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
+        : [i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount).toLocaleString('en-IN'), item.added_by || '-']
+      ),
+      foot: [['', '', '', 'Grand Total', Math.round(total).toLocaleString('en-IN'), '']],
+      headStyles: { fillColor: isExp ? [45, 80, 22] : [46, 125, 50], textColor: 255, fontStyle: 'bold', fontSize: 9, cellPadding: 4 },
+      footStyles: { fillColor: isExp ? [238, 245, 232] : [232, 245, 233], textColor: isExp ? [45, 80, 22] : [46, 125, 50], fontStyle: 'bold', fontSize: 9 },
       bodyStyles: { fontSize: 9, textColor: [30, 30, 30], cellPadding: 3 },
       alternateRowStyles: { fillColor: [248, 246, 242] },
       columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 4: { halign: 'right', cellWidth: 32 } },
       margin: { left: 14, right: 14 },
     })
 
-    doc.save(`Ramalayam_Expenses_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.pdf`)
+    doc.save(`Ramalayam_${isExp ? 'Expenses' : 'Donations'}_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.pdf`)
+  }
+
+  // ── EXCEL ──
+  const downloadExcel = () => {
+    setShowMenu(false)
+    const isExp = activeTab === 'expenses'
+    const data = isExp ? filteredExpenses : filteredDonations
+    if (!data.length) { alert(`No ${isExp ? 'expenses' : 'donations'} for this period.`); return }
+
+    const fl = flLabel(filter)
+    const ds = todayDMY()
+    const total = data.reduce((s, item) => s + Number(item.amount), 0)
+    const title = `Sri Ramalayam Temple — Construction Budget Tracker (${isExp ? 'Expenses' : 'Donations'})`
+
+    const headers = isExp
+      ? ['#', 'Description', 'Category', 'Date', 'Amount (Rs.)', 'Added By']
+      : ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By']
+
+    const rows = data.map((item, i) => isExp
+      ? [i + 1, item.description, CAT_LABELS[item.category], fmtDate(item.date), Math.round(item.amount), item.added_by || '-']
+      : [i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount), item.added_by || '-']
+    )
+
+    const ws = XLSX.utils.aoa_to_sheet([
+      [title],
+      [`Period: ${fl} | Generated: ${ds} | By: ${currentUser}`],
+      [], headers, ...rows, [],
+      ['', '', '', 'Grand Total', Math.round(total), '']
+    ])
+
+    ws['!cols'] = isExp
+      ? [{ wch: 4 }, { wch: 36 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 28 }]
+      : [{ wch: 4 }, { wch: 36 }, { wch: 36 }, { wch: 14 }, { wch: 16 }, { wch: 28 }]
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, isExp ? 'Expenses' : 'Donations')
+    XLSX.writeFile(wb, `Ramalayam_${isExp ? 'Expenses' : 'Donations'}_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.xlsx`)
+  }
+
+  // ── MASTER EXCEL ──
+  const downloadMasterExcel = () => {
+    setShowMenu(false)
+    const fl = flLabel(filter)
+    const ds = todayDMY()
+
+    const wb = XLSX.utils.book_new()
+
+    const dashData = [
+      ['Sri Ramalayam Temple — Master Consolidated Ledger'],
+      [`Period: ${fl} | Generated: ${ds} | By: ${currentUser}`],
+      [], ['Summary'],
+      ['Total Expenses', totalExpenses],
+      ['Total Donations', totalDonations],
+      ['Net Balance', netBalance],
+      [], ['Expenses by Category']
+    ]
+    Object.entries(catTotals).forEach(([cat, tot]) => dashData.push([CAT_LABELS[cat], tot]))
+    const wsDash = XLSX.utils.aoa_to_sheet(dashData)
+    wsDash['!cols'] = [{ wch: 30 }, { wch: 20 }]
+    XLSX.utils.book_append_sheet(wb, wsDash, 'Dashboard')
+
+    const expHeaders = ['#', 'Description', 'Category', 'Date', 'Amount (Rs.)', 'Added By', 'Receipt URL']
+    const expRows = filteredExpenses.map((item, i) => [
+      i + 1, item.description, CAT_LABELS[item.category], fmtDate(item.date), Math.round(item.amount), item.added_by || '-', item.receipt_url || ''
+    ])
+    const wsExp = XLSX.utils.aoa_to_sheet([['Expenses Ledger'], [], expHeaders, ...expRows, [], ['', '', '', 'Grand Total', Math.round(totalExpenses)]])
+    wsExp['!cols'] = [{ wch: 4 }, { wch: 36 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 28 }, { wch: 40 }]
+    XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses')
+
+    const donHeaders = ['#', 'Donor Name', 'Notes', 'Date', 'Amount (Rs.)', 'Recorded By', 'Receipt URL']
+    const donRows = filteredDonations.map((item, i) => [
+      i + 1, item.donor_name, item.notes || '-', fmtDate(item.date), Math.round(item.amount), item.added_by || '-', item.receipt_url || ''
+    ])
+    const wsDon = XLSX.utils.aoa_to_sheet([['Donations Ledger'], [], donHeaders, ...donRows, [], ['', '', '', 'Grand Total', Math.round(totalDonations)]])
+    wsDon['!cols'] = [{ wch: 4 }, { wch: 36 }, { wch: 36 }, { wch: 14 }, { wch: 16 }, { wch: 28 }, { wch: 40 }]
+    XLSX.utils.book_append_sheet(wb, wsDon, 'Donations')
+
+    XLSX.writeFile(wb, `Ramalayam_Master_Ledger_${fl.replace(/ /g, '_')}_${ds.replace(/\//g, '-')}.xlsx`)
   }
 
   const DOWNLOADS = [
-    { icon: '📄', label: 'PDF Report (Expenses)', sub: 'Best for sharing', fn: downloadPDF },
-    { icon: '📊', label: 'Excel (.xlsx)', sub: 'Full report', fn: () => alert('Excel export coming soon!') },
+    { icon: '📄', label: 'PDF Report', sub: 'Best for sharing', fn: downloadPDF },
+    { icon: '📊', label: 'Excel (.xlsx)', sub: 'Current Tab', fn: downloadExcel },
+    { icon: '📚', label: 'Master Ledger', sub: 'All data & summary', fn: downloadMasterExcel },
   ]
 
   return (
@@ -578,7 +723,7 @@ function Dashboard({ currentUser, isEditor, onExit }) {
           <div style={{ background: '#2E7D32', borderRadius: 20, padding: '20px 28px', flex: 1, minWidth: 220, boxShadow: '0 10px 30px rgba(46, 125, 50, 0.25)' }}>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', fontWeight: 600 }}>TOTAL DONATIONS</div>
             <div style={{ fontSize: 36, color: C.white, fontWeight: 800, marginTop: 4 }}>{fmt(totalDonations)}</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 4 }}>{donations.length} donations received</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 4 }}>{filteredDonations.length} donations received</div>
           </div>
 
           <div style={{ background: netBalance >= 0 ? '#1B5E20' : C.danger, borderRadius: 20, padding: '20px 28px', flex: 1, minWidth: 220, boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
@@ -610,32 +755,107 @@ function Dashboard({ currentUser, isEditor, onExit }) {
           </button>
         </div>
 
+        {/* Filters, Search & Download */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {['all', '1w', '1m', '3m', '6m'].map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                style={{
+                  padding: '8px 18px', borderRadius: 999, fontSize: 13, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: filter === f ? C.green : C.white,
+                  color: filter === f ? C.white : C.text,
+                  boxShadow: filter === f ? '0 2px 8px rgba(45, 80, 22, 0.25)' : '0 1px 3px rgba(0,0,0,0.06)'
+                }}
+              >
+                {flLabel(f)}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', flex: '1 1 auto' }}>
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14 }}>🔍</span>
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  padding: '9px 14px 9px 34px', borderRadius: 12, border: `1px solid ${C.border2}`,
+                  fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box', color: C.text
+                }}
+              />
+            </div>
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                style={{
+                  background: C.white, border: `1px solid ${C.border2}`,
+                  padding: '9px 18px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                  color: C.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8
+                }}
+              >
+                ⬇ Download Menu
+              </button>
+
+              {showMenu && (
+                <div style={{
+                  position: 'absolute', right: 0, top: '110%', background: C.white,
+                  border: `1px solid ${C.border}`, borderRadius: 14, padding: '8px 0',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.12)', minWidth: 220, zIndex: 50
+                }}>
+                  {DOWNLOADS.map((d, i) => (
+                    <div key={i} onClick={d.fn} style={{ padding: '11px 18px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', fontSize: 13 }}>
+                      <span style={{ fontSize: 18 }}>{d.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, color: C.text }}>{d.label}</div>
+                        <div style={{ fontSize: 11, color: C.text2 }}>{d.sub}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* EXPENSES SECTION */}
         {activeTab === 'expenses' && (
           <>
             {isEditor && (
               <div style={{ background: C.white, borderRadius: 18, padding: '24px 26px', marginBottom: 24, boxShadow: '0 4px 20px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: C.green, marginBottom: 14 }}>ADD EXPENSE</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.3fr 1.1fr 1fr auto', gap: 12, alignItems: 'end' }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>DESCRIPTION</div>
-                    <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="e.g. Cement bags, Labor charges..." style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="e.g. Cement bags, Labor charges..." style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>CATEGORY</div>
-                    <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', background: C.white }}>
+                    <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', background: C.white }}>
                       {Object.entries(CAT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                     </select>
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>DATE</div>
-                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
+                    <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>AMOUNT (₹)</div>
-                    <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0" style={{ width: '100%', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid ${C.border2}`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <button onClick={addExpense} style={{ height: 44, background: C.green, color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: 'pointer' }}>+ Add Expense</button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: C.text2, fontWeight: 600, marginBottom: 5 }}>RECEIPT PHOTO (Optional)</div>
+                    <input id="expense-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: C.text2 }} />
+                  </div>
+                  <button onClick={addExpense} disabled={isUploading} style={{ height: 44, background: isUploading ? C.text3 : C.green, color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: isUploading ? 'not-allowed' : 'pointer' }}>
+                    {isUploading ? 'Uploading...' : '+ Add Expense'}
+                  </button>
                 </div>
                 {formErr && <div style={{ color: C.danger, fontSize: 12, marginTop: 10, fontWeight: 500 }}>{formErr}</div>}
               </div>
@@ -671,7 +891,12 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                           <td style={{ padding: '13px 18px', fontWeight: 500, color: C.text }}>
                             {editId === e.id ? (
                               <input value={editForm.description} onChange={ev => setEditForm({ ...editForm, description: ev.target.value })} style={{ width: '100%', padding: '4px 8px', fontSize: 13, border: `1px solid ${C.green2}`, borderRadius: 6 }} />
-                            ) : e.description}
+                            ) : (
+                              <>
+                                {e.description}
+                                {e.receipt_url && <a href={e.receipt_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8, fontSize: 14, textDecoration: 'none' }} title="View Receipt">📎</a>}
+                              </>
+                            )}
                           </td>
                           <td style={{ padding: '13px 18px' }}>
                             {editId === e.id ? (
@@ -718,24 +943,32 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             {isEditor && (
               <div style={{ background: '#E8F5E9', borderRadius: 18, padding: '24px 26px', marginBottom: 24, boxShadow: '0 4px 20px rgba(46, 125, 50, 0.1)' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#2E7D32', marginBottom: 14 }}>ADD DONATION RECEIVED</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', gap: 12, alignItems: 'end' }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end', marginBottom: 16 }}>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>DONOR NAME</div>
-                    <input value={donationForm.donor_name} onChange={e => setDonationForm({ ...donationForm, donor_name: e.target.value })} placeholder="e.g. Smt. Lakshmi Devi" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={donationForm.donor_name} onChange={e => setDonationForm({ ...donationForm, donor_name: e.target.value })} placeholder="e.g. Smt. Lakshmi Devi" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>AMOUNT (₹)</div>
-                    <input type="number" value={donationForm.amount} onChange={e => setDonationForm({ ...donationForm, amount: e.target.value })} placeholder="0" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input type="number" value={donationForm.amount} onChange={e => setDonationForm({ ...donationForm, amount: e.target.value })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 120px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>DATE</div>
-                    <input type="date" value={donationForm.date} onChange={e => setDonationForm({ ...donationForm, date: e.target.value })} style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
+                    <input type="date" value={donationForm.date} onChange={e => setDonationForm({ ...donationForm, date: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <div>
+                  <div style={{ flex: '1 1 200px' }}>
                     <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>NOTES (optional)</div>
-                    <input value={donationForm.notes} onChange={e => setDonationForm({ ...donationForm, notes: e.target.value })} placeholder="For temple construction" style={{ width: '100%', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
+                    <input value={donationForm.notes} onChange={e => setDonationForm({ ...donationForm, notes: e.target.value })} placeholder="For temple construction" style={{ width: '100%', boxSizing: 'border-box', height: 44, border: `1px solid #81C784`, borderRadius: 10, padding: '0 14px', fontSize: 14, outline: 'none' }} />
                   </div>
-                  <button onClick={addDonation} style={{ height: 44, background: '#2E7D32', color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: 'pointer' }}>+ Add Donation</button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: '#2E7D32', fontWeight: 600, marginBottom: 5 }}>PAYMENT RECEIPT (Optional)</div>
+                    <input id="donation-receipt-upload" type="file" accept="image/*,application/pdf" onChange={e => setReceiptFile(e.target.files[0])} style={{ fontSize: 12, color: '#2E7D32' }} />
+                  </div>
+                  <button onClick={addDonation} disabled={isUploading} style={{ height: 44, background: isUploading ? C.text3 : '#2E7D32', color: C.white, border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, padding: '0 28px', cursor: isUploading ? 'not-allowed' : 'pointer' }}>
+                    {isUploading ? 'Uploading...' : '+ Add Donation'}
+                  </button>
                 </div>
                 {donationFormErr && <div style={{ color: C.danger, fontSize: 12, marginTop: 10, fontWeight: 500 }}>{donationFormErr}</div>}
               </div>
@@ -745,10 +978,10 @@ function Dashboard({ currentUser, isEditor, onExit }) {
             <div style={{ background: C.white, borderRadius: 18, boxShadow: '0 4px 20px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
               <div style={{ padding: '16px 22px', borderBottom: `1px solid ${C.border}` }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#2E7D32' }}>DONATIONS RECEIVED (LIVE FROM DEVOTEES)</div>
-                <div style={{ fontSize: 11, color: C.text2, marginTop: 2 }}>Total: {fmt(totalDonations)} from {donations.length} generous donors</div>
+              <div style={{ fontSize: 11, color: C.text2, marginTop: 2 }}>Total: {fmt(totalDonations)} from {filteredDonations.length} generous donors</div>
               </div>
 
-              {donations.length === 0 ? (
+            {filteredDonations.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: C.text2 }}>
                   <div style={{ fontSize: 42, marginBottom: 12, opacity: 0.3 }}>🙏</div>
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>No donations yet</div>
@@ -768,9 +1001,14 @@ function Dashboard({ currentUser, isEditor, onExit }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {donations.map((d, idx) => (
+                    {filteredDonations.map((d, idx) => (
                         <tr key={d.id} style={{ borderTop: idx > 0 ? `1px solid ${C.border}` : 'none' }}>
-                          <td style={{ padding: '13px 18px', fontWeight: 600, color: C.text }}>{d.donor_name}</td>
+                          <td style={{ padding: '13px 18px', fontWeight: 600, color: C.text }}>
+                            {d.donor_name}
+                            {d.receipt_url && (
+                              <a href={d.receipt_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8, fontSize: 14, textDecoration: 'none' }} title="View Receipt">📎</a>
+                            )}
+                          </td>
                           <td style={{ padding: '13px 18px', color: C.text2, fontSize: 12 }}>{fmtDate(d.date)}</td>
                           <td style={{ padding: '13px 18px', textAlign: 'right', fontWeight: 700, color: '#2E7D32', fontSize: 14 }}>{fmt(d.amount)}</td>
                           <td style={{ padding: '13px 18px', color: C.text2, fontSize: 12 }}>{d.notes || '-'}</td>
